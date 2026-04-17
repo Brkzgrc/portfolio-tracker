@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-Portföy Takip Sistemi v2.0
+Portföy Takip Sistemi v2.1
 ===========================
 - bot.py (Scanner v7) ve SMC.py (SMC Sniper v4) sinyallerini HTTP POST ile alır
 - Açık pozisyonları 5 dakikada bir Binance REST API ile kontrol eder
 - TP1'de pozisyon KAPANIR (gerçek sonuç)
 - TP2 shadow tracking: TP1 kapandıktan sonra da fiyatı izler,
-  TP2'ye ulaşıp ulaşmadığını kaydeder (analiz için)
+  TP2'ye STOP'a DÜŞMEDEN ulaşıp ulaşmadığını kaydeder (analiz için)
+- Günlük P&L açılış zamanına göre kaydedilir
 - HTML dashboard + TP2 analiz bölümü
 - JSON dosya tabanlı kayıt
 """
@@ -270,18 +271,30 @@ def check_open_positions():
                       f"{pct:+.2f}% | Peak: {sig['peak_pct']:+.2f}%", flush=True)
 
         # ====================================================
-        # B) TP2 SHADOW TAKİP
+        # B) TP2 SHADOW TAKİP — stop kontrolü dahil
         # ====================================================
         elif sig.get("tp2_shadow") == "watching" and sig.get("tp2"):
             tp2 = sig["tp2"]
+            stop = sig["stop"]
             sig["last_check"] = now.isoformat()
+            sig["current_price"] = close
+            sig["current_pct"] = round((close - entry) / entry * 100, 2)
 
             after_tp1_pct = round((high - entry) / entry * 100, 2)
             if after_tp1_pct > sig.get("tp2_peak_after_tp1", 0):
                 sig["tp2_peak_after_tp1"] = after_tp1_pct
                 need_save = True
 
-            if high >= tp2:
+            # Stop'a düştü → TP2 başarısız (gerçek hayatta pozisyon kapanırdı)
+            if low <= stop:
+                sig["tp2_shadow"] = "stopped"
+                sig["tp2_shadow_end"] = now.isoformat()
+                need_save = True
+
+                sym = symbol.replace("/USDT", "")
+                print(f"  🔴 TP2 SHADOW STOP: {sym} | Stop'a düştü, TP2 başarısız", flush=True)
+
+            elif high >= tp2:
                 sig["tp2_shadow"] = "hit"
                 sig["tp2_hit"] = True
                 sig["tp2_time"] = now.isoformat()
@@ -336,6 +349,7 @@ def calc_performance():
         "total_pnl": 0.0, "avg_peak": 0.0, "win_rate": 0.0,
         "tp2_shadow_total": 0, "tp2_shadow_hit": 0,
         "tp2_shadow_missed": 0, "tp2_shadow_watching": 0,
+        "tp2_shadow_stopped": 0,
         "tp2_potential_extra_pnl": 0.0,
         "by_type": {}, "daily": {}, "weekly": {}, "monthly": {},
     }
@@ -345,6 +359,7 @@ def calc_performance():
         "total": 0, "open": 0, "wins": 0, "losses": 0, "expired": 0,
         "tp1_hits": 0, "total_pnl": 0.0, "peaks": [],
         "tp2_hits": 0, "tp2_total": 0, "tp2_extra_pnl": 0.0,
+        "tp2_stopped": 0,
     })
 
     for sig in all_sigs:
@@ -388,7 +403,7 @@ def calc_performance():
                 result["expired"] += 1; ts["expired"] += 1
 
             tp2_shadow = sig.get("tp2_shadow", "n/a")
-            if tp2_shadow != "n/a":
+            if tp2_shadow not in ("n/a",):
                 result["tp2_shadow_total"] += 1; ts["tp2_total"] += 1
                 if tp2_shadow == "hit":
                     result["tp2_shadow_hit"] += 1; ts["tp2_hits"] += 1
@@ -400,13 +415,17 @@ def calc_performance():
                         ts["tp2_extra_pnl"] += extra
                 elif tp2_shadow == "missed":
                     result["tp2_shadow_missed"] += 1
+                elif tp2_shadow == "stopped":
+                    result["tp2_shadow_stopped"] += 1
+                    ts["tp2_stopped"] += 1
                 elif tp2_shadow == "watching":
                     result["tp2_shadow_watching"] += 1
 
-            close_time = sig.get("close_time") or sig.get("open_time", "")
-            if close_time:
+            # Günlük/Haftalık/Aylık — açılış zamanına göre kaydet
+            open_time_str = sig.get("open_time", "")
+            if open_time_str:
                 try:
-                    dt = datetime.fromisoformat(close_time)
+                    dt = datetime.fromisoformat(open_time_str)
                     day_key = dt.strftime("%Y-%m-%d")
                     week_key = dt.strftime("%Y-W%W")
                     month_key = dt.strftime("%Y-%m")
@@ -524,7 +543,7 @@ def status_badge(status):
 def tp2_shadow_badge(sig):
     shadow = sig.get("tp2_shadow", "n/a")
     m = {"hit": ("#2ecc71", "✅ TP2 HIT"), "missed": ("#e74c3c", "❌ MISS"),
-         "watching": ("#3498db", "👁 İZLENİYOR")}
+         "watching": ("#3498db", "👁 İZLENİYOR"), "stopped": ("#e74c3c", "🔴 STOP")}
     if shadow in m:
         c, l = m[shadow]
         return f'<span style="background:{c}22;color:{c};padding:1px 6px;border-radius:3px;font-size:.6rem">{l}</span>'
@@ -608,7 +627,7 @@ def dashboard():
             <td style="color:{tp2r_c}">{ts.get('tp2_hits',0)}/{ts.get('tp2_total',0)} (%{tp2r})</td>
             <td style="color:{tp2e_c}">{tp2e:+.2f}%</td></tr>"""
 
-    # === SHADOW WATCHING ===
+    # === SHADOW WATCHING — anlık fiyat eklendi ===
     shadow_rows = ""
     for sig in shadow_watching[:30]:
         sym = sig["symbol"].replace("/USDT", "")
@@ -617,6 +636,9 @@ def dashboard():
         tp2_pct = round((tp2 - entry) / entry * 100, 1) if tp2 and entry > 0 else 0
         pa = sig.get("tp2_peak_after_tp1", 0)
         pa_c = "#2ecc71" if pa > tp1_pct else "#8a9bb0"
+        cur_price = sig.get("current_price", entry)
+        cur_pct = sig.get("current_pct", 0)
+        cur_c = "#2ecc71" if cur_pct > 0 else ("#e74c3c" if cur_pct < 0 else "#8a9bb0")
         remaining = ""
         try:
             ct = datetime.fromisoformat(sig.get("close_time", sig["open_time"]))
@@ -626,6 +648,7 @@ def dashboard():
         shadow_rows += f"""<tr>
             <td style="color:#ecf0f1"><b>{sym}</b></td><td>{type_badge(sig)}</td>
             <td style="color:#2ecc71">+{tp1_pct:.2f}%</td>
+            <td style="color:{cur_c}">{fmt_price(cur_price)} ({cur_pct:+.2f}%)</td>
             <td>{fmt_price(tp2)} (+{tp2_pct}%)</td>
             <td style="color:{pa_c}">+{pa:.2f}%</td>
             <td style="color:#7f8c8d;font-size:.7rem">{remaining}</td></tr>"""
@@ -645,23 +668,25 @@ def dashboard():
     tp2_extra_total = perf.get("tp2_potential_extra_pnl", 0)
     tp2_extra_color = "#2ecc71" if tp2_extra_total > 0 else "#8a9bb0"
     tp2_hit_count = perf.get("tp2_shadow_hit", 0)
+    tp2_stopped_count = perf.get("tp2_shadow_stopped", 0)
     tp2_total_count = perf.get("tp2_shadow_total", 0)
-    tp2_rate = round(tp2_hit_count / tp2_total_count * 100, 1) if tp2_total_count > 0 else 0
+    tp2_decided = tp2_hit_count + tp2_stopped_count + perf.get("tp2_shadow_missed", 0)
+    tp2_rate = round(tp2_hit_count / tp2_decided * 100, 1) if tp2_decided > 0 else 0
 
     shadow_section = ""
     if shadow_rows:
         shadow_section = f"""
 <div class="section">
     <h2>👁 TP2 SHADOW İZLEME ({len(shadow_watching)})</h2>
-    <p class="note">TP1'de kapanmış ama TP2'ye ulaşıp ulaşmayacağı izleniyor.</p>
+    <p class="note">TP1'de kapanmış — TP2'ye stop'a düşmeden ulaşabilir miydi izleniyor.</p>
     <div class="table-wrap"><table><thead><tr>
-        <th>Sembol</th><th>Tür</th><th>TP1 Kâr</th><th>TP2 Hedef</th><th>Peak Sonrası</th><th>Kalan</th>
+        <th>Sembol</th><th>Tür</th><th>TP1 Kâr</th><th>Şu An</th><th>TP2 Hedef</th><th>Peak Sonrası</th><th>Kalan</th>
     </tr></thead><tbody>{shadow_rows}</tbody></table></div>
 </div>"""
 
     html = f"""<!DOCTYPE html>
 <html lang="tr"><head>
-<meta charset="UTF-8"><title>Portföy Takip v2.0</title>
+<meta charset="UTF-8"><title>Portföy Takip v2.1</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="refresh" content="60">
 <style>
@@ -703,7 +728,7 @@ tr:hover td{{background:var(--card);}}
 
 <div class="header">
     <h1>📊 PORTFÖY TAKİP</h1>
-    <span class="time">{now} | v2.0</span>
+    <span class="time">{now} | v2.1</span>
 </div>
 
 <div class="cards">
@@ -719,20 +744,20 @@ tr:hover td{{background:var(--card);}}
 </div>
 
 <div class="tp2-box">
-    <h3>🎯 TP2 ANALİZ — "TP2'de kapatsaydık ne olurdu?"</h3>
+    <h3>🎯 TP2 ANALİZ — "TP1'de çıkmadan TP2'yi hedefleseydik ne olurdu?"</h3>
     <div class="tp2-stats">
-        <div class="tp2-stat"><span class="v" style="color:#3498db">{tp2_hit_count}/{tp2_total_count}</span>
-            <span class="l">TP2'ye Ulaşan</span></div>
+        <div class="tp2-stat"><span class="v" style="color:#2ecc71">{tp2_hit_count}</span>
+            <span class="l">TP2 Başarılı</span></div>
+        <div class="tp2-stat"><span class="v" style="color:#e74c3c">{tp2_stopped_count}</span>
+            <span class="l">TP2 Stop Oldu</span></div>
         <div class="tp2-stat"><span class="v" style="color:{'#2ecc71' if tp2_rate>=50 else '#f39c12'}">{tp2_rate}%</span>
-            <span class="l">TP2 Hit Rate</span></div>
+            <span class="l">TP2 Başarı Oranı</span></div>
         <div class="tp2-stat"><span class="v" style="color:{tp2_extra_color}">{tp2_extra_total:+.2f}%</span>
-            <span class="l">Kaçırılan Ekstra Kâr</span></div>
+            <span class="l">TP2 Ekstra Kâr</span></div>
         <div class="tp2-stat"><span class="v" style="color:#3498db">{perf.get('tp2_shadow_watching',0)}</span>
             <span class="l">Hâlâ İzlenen</span></div>
         <div class="tp2-stat"><span class="v" style="color:{pnl_color}">{total_pnl:+.2f}%</span>
             <span class="l">Gerçek P&L (TP1)</span></div>
-        <div class="tp2-stat"><span class="v" style="color:{'#2ecc71' if (total_pnl+tp2_extra_total)>0 else '#e74c3c'}"
-            >{(total_pnl+tp2_extra_total):+.2f}%</span><span class="l">TP2 Olsaydı P&L</span></div>
     </div>
 </div>
 
@@ -779,7 +804,7 @@ tr:hover td{{background:var(--card);}}
 </div>
 
 <div class="footer">
-    Portföy Takip v2.0 | TP1'de kapat + TP2 shadow takip |
+    Portföy Takip v2.1 | TP1'de kapat + TP2 shadow (stop kontrollü) |
     Kontrol: {CHECK_INTERVAL//60}dk | Expire: {EXPIRE_HOURS}s | Shadow: {SHADOW_EXPIRE_HOURS}s | {now}
 </div>
 </body></html>"""
@@ -791,8 +816,8 @@ tr:hover td{{background:var(--card);}}
 # ============================================================
 if __name__ == "__main__":
     print("=" * 50, flush=True)
-    print("📊 Portföy Takip Sistemi v2.0", flush=True)
-    print("   TP1'de kapat + TP2 shadow takip", flush=True)
+    print("📊 Portföy Takip Sistemi v2.1", flush=True)
+    print("   TP1'de kapat + TP2 shadow (stop kontrollü)", flush=True)
     print("=" * 50, flush=True)
     print(f"  Kontrol aralığı  : {CHECK_INTERVAL}s ({CHECK_INTERVAL // 60} dk)", flush=True)
     print(f"  Expire süresi    : {EXPIRE_HOURS} saat", flush=True)
