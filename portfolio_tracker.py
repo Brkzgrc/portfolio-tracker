@@ -274,7 +274,7 @@ def calc_performance():
         sub = sig.get("sub_type", "")
         source = sig.get("source", "bot")
 
-        if source == "smc":
+        if source.startswith("smc"):
             type_key = f"SMC-{sig.get('phase', '').replace('phase', 'P')}"
         elif sig_type == "tp":
             type_key = f"TP-{sub.capitalize()}" if sub else "TP"
@@ -452,7 +452,7 @@ def type_badge(sig):
     sig_type = sig.get("sig_type", "unknown")
     sub = sig.get("sub_type", "")
     source = sig.get("source", "bot")
-    if source == "smc":
+    if source.startswith("smc"):
         phase = sig.get("phase", "")
         return f'<span style="background:#e67e2222;color:#e67e22;padding:2px 6px;border-radius:3px;font-size:.65rem">SMC {phase}</span>'
     colors = {"dip": "#2ecc71", "trend": "#3498db", "birikim": "#9b59b6", "tp": "#e67e22"}
