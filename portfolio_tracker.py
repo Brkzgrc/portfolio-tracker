@@ -80,7 +80,7 @@ def receive_signal():
     # ── AYNI SEMBOLDE AÇIK POZİSYON KONTROLÜ ──
     with _lock:
         for s in signals_db:
-            if s.get("symbol") == data["symbol"] and s.get("status") == "open":
+            if s.get("symbol") == data["symbol"] and s.get("status") == "open" and s.get("source") == data.get("source", "bot"):
                 print(f"[SİNYAL] REDDEDILDI: {data['symbol']} zaten açık pozisyonda", flush=True)
                 return jsonify({"error": "already open", "symbol": data["symbol"]}), 409
 
