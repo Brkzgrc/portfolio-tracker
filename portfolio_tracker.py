@@ -274,7 +274,11 @@ def calc_performance():
         sub = sig.get("sub_type", "")
         source = sig.get("source", "bot")
 
-        if source.startswith("smc"):
+        if source == "smc-trailing":
+            type_key = f"SMC-T-{sig.get('phase', '').replace('phase', 'P')}"
+        elif source == "smc-momentum":
+            type_key = f"SMC-M-{sig.get('phase', '').replace('phase', 'P')}"
+        elif source == "smc":
             type_key = f"SMC-{sig.get('phase', '').replace('phase', 'P')}"
         elif sig_type == "tp":
             type_key = f"TP-{sub.capitalize()}" if sub else "TP"
@@ -452,9 +456,10 @@ def type_badge(sig):
     sig_type = sig.get("sig_type", "unknown")
     sub = sig.get("sub_type", "")
     source = sig.get("source", "bot")
-    if source.startswith("smc"):
+    if source in ("smc", "smc-trailing", "smc-momentum"):
         phase = sig.get("phase", "")
-        return f'<span style="background:#e67e2222;color:#e67e22;padding:2px 6px;border-radius:3px;font-size:.65rem">SMC {phase}</span>'
+        src_label = "SMC-T" if source == "smc-trailing" else ("SMC-M" if source == "smc-momentum" else "SMC")
+        return f'<span style="background:#e67e2222;color:#e67e22;padding:2px 6px;border-radius:3px;font-size:.65rem">{src_label} {phase}</span>'
     colors = {"dip": "#2ecc71", "trend": "#3498db", "birikim": "#9b59b6", "tp": "#e67e22"}
     c = colors.get(sig_type, "#8a9bb0")
     label = sig_type.upper() + (f" {sub}" if sub else "")
