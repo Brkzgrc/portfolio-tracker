@@ -484,12 +484,15 @@ def dashboard():
         low_c, low_s = pct_color(sig.get("low_pct"))
         sym = sig["symbol"].replace("/USDT", "")
         tp1_pct = round((sig["tp1"] - sig["entry"]) / sig["entry"] * 100, 1) if sig["entry"] > 0 else 0
+        tp2_val = sig.get("tp2")
+        tp2_pct_open = round((tp2_val - sig["entry"]) / sig["entry"] * 100, 1) if tp2_val and sig["entry"] > 0 else 0
         open_rows += f"""<tr>
             <td style="color:#ecf0f1"><b>{sym}</b></td><td>{type_badge(sig)}</td>
             <td>{fmt_price(sig['entry'])}</td>
             <td style="color:{cur_c};font-weight:bold">{fmt_price(sig.get('current_price'))} ({cur_s})</td>
             <td style="color:{peak_c}">{peak_s}</td><td style="color:{low_c}">{low_s}</td>
             <td>{fmt_price(sig['stop'])}</td><td>{fmt_price(sig['tp1'])} (+{tp1_pct}%)</td>
+            <td>{fmt_price(tp2_val)} (+{tp2_pct_open}%)</td>
             <td style="font-size:.7rem;color:#7f8c8d">{(sig.get('open_time',''))[:16]}</td></tr>"""
 
     closed_rows = ""
@@ -679,7 +682,7 @@ tr:hover td{{background:var(--card);}}
     <p class="note">TP1'e ulaşınca otomatik kapanır. Stop'a düşerse zarar yazılır.</p>
     <div class="table-wrap"><table><thead><tr>
         <th>Sembol</th><th>Tür</th><th>Giriş</th><th>Şu An</th><th>Peak</th><th>Dip</th>
-        <th>Stop</th><th>TP1</th><th>Açılış</th>
+        <th>Stop</th><th>TP1</th><th>TP2</th><th>Açılış</th>
     </tr></thead><tbody>
         {open_rows if open_rows else '<tr><td colspan="9" class="empty">Açık pozisyon yok</td></tr>'}
     </tbody></table></div>
