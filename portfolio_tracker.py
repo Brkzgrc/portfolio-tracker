@@ -107,6 +107,9 @@ def receive_signal():
         "tp1_hit": False, "tp1_time": None,
         "tp2_shadow": "watching", "tp2_hit": False, "tp2_time": None,
         "tp2_peak_after_tp1": 0.0, "tp2_shadow_end": None,
+        "trailing_shadow": "watching", "trailing_peak": 0.0,
+        "trailing_stop_pct": 2.0, "trailing_exit_price": None,
+        "trailing_exit_pct": None, "trailing_shadow_end": None,
         "last_check": now.isoformat(), "checks": 0,
         "extra": {k: v for k, v in data.items() if k not in required + [
             "sig_type", "type", "sub_type", "subtype", "tp_system",
@@ -187,6 +190,8 @@ def check_open_positions():
                 close_reason = "tp1"; close_price = tp1
                 sig["status"] = "win_tp1"; sig["tp1_hit"] = True; sig["tp1_time"] = now.isoformat()
                 sig["tp2_shadow"] = "watching" if tp2 else "n/a"
+                sig["trailing_shadow"] = "watching"
+                sig["trailing_peak"] = float(tp1)
             else:
                 open_time = datetime.fromisoformat(sig["open_time"])
                 if open_time.tzinfo is None: open_time = open_time.replace(tzinfo=TR_TZ)
@@ -226,6 +231,24 @@ def check_open_positions():
                 if close_time.tzinfo is None: close_time = close_time.replace(tzinfo=TR_TZ)
                 if (now - close_time).total_seconds() / 3600 >= SHADOW_EXPIRE_HOURS:
                     sig["tp2_shadow"] = "missed"; sig["tp2_shadow_end"] = now.isoformat(); need_save = True
+
+        # ── TRAILING SHADOW ──
+        if sig.get("trailing_shadow") == "watching" and sig.get("status") != "open":
+            trail_pct = sig.get("trailing_stop_pct", 2.0)
+            trail_peak = sig.get("trailing_peak", 0.0)
+            if high > trail_peak:
+                sig["trailing_peak"] = high; need_save = True
+                trail_peak = high
+            trail_stop_price = trail_peak * (1 - trail_pct / 100)
+            if low <= trail_stop_price:
+                exit_price = trail_stop_price
+                exit_pct = round((exit_price - entry) / entry * 100, 2)
+                sig["trailing_shadow"] = "stopped"
+                sig["trailing_exit_price"] = round(exit_price, 8)
+                sig["trailing_exit_pct"] = exit_pct
+                sig["trailing_shadow_end"] = now.isoformat()
+                need_save = True
+                print(f"  📉 TRAILING SHADOW STOP: {symbol.replace('/USDT','')} | {exit_pct:+.2f}%", flush=True)
         time.sleep(0.15)
 
     if need_save or closed_count > 0:
@@ -257,6 +280,8 @@ def calc_performance():
         "tp2_shadow_missed": 0, "tp2_shadow_watching": 0,
         "tp2_shadow_stopped": 0,
         "tp2_potential_extra_pnl": 0.0,
+        "trailing_shadow_total": 0, "trailing_shadow_stopped": 0,
+        "trailing_shadow_watching": 0, "trailing_total_pnl": 0.0,
         "by_type": {}, "daily": {}, "weekly": {}, "monthly": {},
     }
 
@@ -323,6 +348,17 @@ def calc_performance():
                     result["tp2_shadow_stopped"] += 1; ts["tp2_stopped"] += 1
                 elif tp2_shadow == "watching": result["tp2_shadow_watching"] += 1
 
+            # Trailing shadow istatistikleri
+            trail = sig.get("trailing_shadow", "n/a")
+            if trail not in ("n/a",):
+                result["trailing_shadow_total"] += 1
+                if trail == "stopped":
+                    result["trailing_shadow_stopped"] += 1
+                    trail_pct = sig.get("trailing_exit_pct", 0) or 0
+                    result["trailing_total_pnl"] += trail_pct
+                elif trail == "watching":
+                    result["trailing_shadow_watching"] += 1
+
             open_time_str = sig.get("open_time", "")
             if open_time_str:
                 try:
@@ -346,6 +382,7 @@ def calc_performance():
         result["win_rate"] = round(result["wins"] / result["closed"] * 100, 1)
     result["total_pnl"] = round(result["total_pnl"], 2)
     result["tp2_potential_extra_pnl"] = round(result["tp2_potential_extra_pnl"], 2)
+    result["trailing_total_pnl"] = round(result["trailing_total_pnl"], 2)
 
     for tk, ts in type_stats.items():
         closed = ts["wins"] + ts["losses"] + ts["expired"]
@@ -584,6 +621,13 @@ def dashboard():
     tp2_combined_pnl = round(total_pnl + tp2_extra_total, 2)
     tp2_combined_color = "#2ecc71" if tp2_combined_pnl > 0 else ("#e74c3c" if tp2_combined_pnl < 0 else "#8a9bb0")
 
+    # Trailing shadow hesapları
+    trail_total = perf.get("trailing_shadow_total", 0)
+    trail_stopped = perf.get("trailing_shadow_stopped", 0)
+    trail_watching = perf.get("trailing_shadow_watching", 0)
+    trail_pnl = perf.get("trailing_total_pnl", 0)
+    trail_pnl_color = "#2ecc71" if trail_pnl > 0 else ("#e74c3c" if trail_pnl < 0 else "#8a9bb0")
+
     shadow_section = ""
     if shadow_rows:
         shadow_section = f"""
@@ -671,6 +715,20 @@ tr:hover td{{background:var(--card);}}
             <span class="l">Gerçek P&L (TP1)</span></div>
         <div class="tp2-stat"><span class="v" style="color:{tp2_combined_color}">{tp2_combined_pnl:+.2f}%</span>
             <span class="l">TP2 Dahil P&L</span></div>
+    </div>
+</div>
+
+<div class="tp2-box">
+    <h3>📈 TRAİLİNG SHADOW — "TP1 sonrası %2 trailing stop olsaydı ne olurdu?"</h3>
+    <div class="tp2-stats">
+        <div class="tp2-stat"><span class="v" style="color:#2ecc71">{trail_stopped}</span>
+            <span class="l">Trailing Stop Oldu</span></div>
+        <div class="tp2-stat"><span class="v" style="color:#3498db">{trail_watching}</span>
+            <span class="l">Hâlâ İzlenen</span></div>
+        <div class="tp2-stat"><span class="v" style="color:{trail_pnl_color}">{trail_pnl:+.2f}%</span>
+            <span class="l">Trailing P&L</span></div>
+        <div class="tp2-stat"><span class="v" style="color:{pnl_color_val}">{total_pnl:+.2f}%</span>
+            <span class="l">Gerçek P&L (TP1)</span></div>
     </div>
 </div>
 
