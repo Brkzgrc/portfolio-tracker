@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-Portföy Takip Sistemi v2.2
+Portföy Takip Sistemi v2.3
 ===========================
-v2.1 + aynı sembol kontrolü + TP2 dahil P&L gösterimi
+v2.2 + TP2 hit/stop fiyat gösterimi + kapanmış işlemlerde trailing sütunu
 """
 
 import json
@@ -488,11 +488,23 @@ def status_badge(status):
 
 def tp2_shadow_badge(sig):
     shadow = sig.get("tp2_shadow", "n/a")
-    m = {"hit": ("#2ecc71", "✅ TP2 HIT"), "missed": ("#e74c3c", "❌ MISS"),
+    entry = sig.get("entry", 0)
+    m = {"hit": ("#2ecc71", "✅ TP2"), "missed": ("#e74c3c", "❌ MISS"),
          "watching": ("#3498db", "👁 İZLENİYOR"), "stopped": ("#e74c3c", "🔴 STOP")}
     if shadow in m:
         c, l = m[shadow]
-        return f'<span style="background:{c}22;color:{c};padding:1px 6px;border-radius:3px;font-size:.6rem">{l}</span>'
+        extra = ""
+        if shadow == "hit":
+            tp2 = sig.get("tp2")
+            if tp2 and entry and entry > 0:
+                tp2_pct = round((tp2 - entry) / entry * 100, 2)
+                extra = f" <span style='color:#a8e6a3;font-size:.58rem'>{fmt_price(tp2)} (+{tp2_pct}%)</span>"
+        elif shadow == "stopped":
+            stop = sig.get("stop")
+            if stop and entry and entry > 0:
+                stop_pct = round((stop - entry) / entry * 100, 2)
+                extra = f" <span style='color:#f1948a;font-size:.58rem'>{fmt_price(stop)} ({stop_pct:+.2f}%)</span>"
+        return f'<span style="background:{c}22;color:{c};padding:1px 6px;border-radius:3px;font-size:.6rem">{l}{extra}</span>'
     return '<span style="color:#5a6a7a;font-size:.6rem">—</span>'
 
 def type_badge(sig):
@@ -544,12 +556,25 @@ def dashboard():
         close_c, close_s = pct_color(sig.get("close_pct"))
         peak_c, peak_s = pct_color(sig.get("peak_pct"))
         sym = sig["symbol"].replace("/USDT", "")
+        # Trailing badge
+        trail = sig.get("trailing_shadow", "n/a")
+        trail_cell = '<span style="color:#5a6a7a;font-size:.6rem">—</span>'
+        if trail == "stopped":
+            ep = sig.get("trailing_exit_price")
+            ep_pct = sig.get("trailing_exit_pct")
+            if ep and ep_pct is not None:
+                tc = "#2ecc71" if ep_pct > 0 else "#e74c3c"
+                trail_cell = (f'<span style="background:{tc}22;color:{tc};padding:1px 6px;'
+                              f'border-radius:3px;font-size:.6rem">📉 {fmt_price(ep)} ({ep_pct:+.2f}%)</span>')
+        elif trail == "watching":
+            trail_cell = '<span style="background:#3498db22;color:#3498db;padding:1px 6px;border-radius:3px;font-size:.6rem">👁 İZL</span>'
         closed_rows += f"""<tr>
             <td style="color:#ecf0f1"><b>{sym}</b></td><td>{type_badge(sig)}</td>
             <td>{status_badge(sig.get('status','unknown'))}</td>
             <td>{fmt_price(sig['entry'])}</td>
             <td style="color:{close_c};font-weight:bold">{close_s}</td>
             <td style="color:{peak_c}">{peak_s}</td><td>{tp2_shadow_badge(sig)}</td>
+            <td>{trail_cell}</td>
             <td style="font-size:.7rem;color:#7f8c8d">{(sig.get('open_time',''))[:16]}</td>
             <td style="font-size:.7rem;color:#7f8c8d">{(sig.get('close_time') or '')[:16]}</td></tr>"""
 
@@ -683,7 +708,7 @@ tr:hover td{{background:var(--card);}}
 
 <div class="header">
     <h1>📊 PORTFÖY TAKİP</h1>
-    <span class="time">{now} | v2.2</span>
+    <span class="time">{now} | v2.3</span>
 </div>
 
 <div class="cards">
@@ -759,9 +784,9 @@ tr:hover td{{background:var(--card);}}
     <h2>📋 KAPANMIŞ İŞLEMLER (son 100)</h2>
     <div class="table-wrap"><table><thead><tr>
         <th>Sembol</th><th>Tür</th><th>Sonuç</th><th>Giriş</th><th>Getiri</th><th>Peak</th>
-        <th>TP2</th><th>Açılış</th><th>Kapanış</th>
+        <th>TP2</th><th>Trailing</th><th>Açılış</th><th>Kapanış</th>
     </tr></thead><tbody>
-        {closed_rows if closed_rows else '<tr><td colspan="9" class="empty">Henüz kapanmış işlem yok</td></tr>'}
+        {closed_rows if closed_rows else '<tr><td colspan="10" class="empty">Henüz kapanmış işlem yok</td></tr>'}
     </tbody></table></div>
 </div>
 
@@ -775,7 +800,7 @@ tr:hover td{{background:var(--card);}}
 </div>
 
 <div class="footer">
-    Portföy Takip v2.2 | TP1'de kapat + TP2 shadow (stop kontrollü) |
+    Portföy Takip v2.3 | TP1'de kapat + TP2 shadow (fiyat gösterimli) + Trailing shadow |
     Kontrol: {CHECK_INTERVAL//60}dk | Expire: {EXPIRE_HOURS}s | Shadow: {SHADOW_EXPIRE_HOURS}s | {now}
 </div>
 </body></html>"""
@@ -786,8 +811,8 @@ tr:hover td{{background:var(--card);}}
 # ============================================================
 if __name__ == "__main__":
     print("=" * 50, flush=True)
-    print("📊 Portföy Takip Sistemi v2.2", flush=True)
-    print("   TP1'de kapat + TP2 shadow + aynı sembol kontrolü", flush=True)
+    print("📊 Portföy Takip Sistemi v2.3", flush=True)
+    print("   TP1'de kapat + TP2 fiyat gösterimi + Trailing sütunu", flush=True)
     print("=" * 50, flush=True)
     print(f"  Kontrol aralığı  : {CHECK_INTERVAL}s ({CHECK_INTERVAL // 60} dk)", flush=True)
     print(f"  Expire süresi    : {EXPIRE_HOURS} saat", flush=True)
