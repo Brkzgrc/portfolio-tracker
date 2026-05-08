@@ -301,15 +301,15 @@ def calc_performance():
 
         if source == "smc-trailing":
             phase = sig.get('phase', '')
-            phase_label = "Pusu" if phase == "pusu" else ("Tetik" if phase == "tetik" else phase.replace('phase', 'P'))
+            phase_label = "Discount" if phase == "discount" else ("CHoCH" if phase == "choch" else phase.replace('phase', 'P'))
             type_key = f"SMC-T {phase_label}"
         elif source == "smc-momentum":
             phase = sig.get('phase', '')
-            phase_label = "Pusu" if phase == "pusu" else ("Tetik" if phase == "tetik" else phase.replace('phase', 'P'))
+            phase_label = "Discount" if phase == "discount" else ("CHoCH" if phase == "choch" else phase.replace('phase', 'P'))
             type_key = f"SMC-M {phase_label}"
         elif source in ("smc", "smc-original"):
             phase = sig.get('phase', '')
-            phase_label = "Pusu" if phase == "pusu" else ("Tetik" if phase == "tetik" else phase.replace('phase', 'P'))
+            phase_label = "Discount" if phase == "discount" else ("CHoCH" if phase == "choch" else phase.replace('phase', 'P'))
             type_key = f"SMC {phase_label}"
         elif sig_type == "tp":
             type_key = f"TP-{sub.capitalize()}" if sub else "TP"
@@ -513,7 +513,7 @@ def type_badge(sig):
     source = sig.get("source", "bot")
     if source in ("smc", "smc-original", "smc-trailing", "smc-momentum"):
         phase = sig.get("phase", "")
-        phase_label = "Pusu" if phase == "pusu" else ("Tetik" if phase == "tetik" else phase.replace('phase', 'P'))
+        phase_label = "Discount" if phase == "discount" else ("CHoCH" if phase == "choch" else phase.replace('phase', 'P'))
         src_label = "SMC-T" if source == "smc-trailing" else ("SMC-M" if source == "smc-momentum" else "SMC")
         return f'<span style="background:#e67e2222;color:#e67e22;padding:2px 6px;border-radius:3px;font-size:.65rem">{src_label} {phase_label}</span>'
     colors = {"dip": "#2ecc71", "trend": "#3498db", "birikim": "#9b59b6", "tp": "#e67e22"}
