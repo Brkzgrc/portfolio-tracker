@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-Portföy Takip Sistemi v2.3
+Portföy Takip Sistemi v2.4
 ===========================
-v2.2 + TP2 hit/stop fiyat gösterimi + kapanmış işlemlerde trailing sütunu
+v2.3 + stop sütununa yüzde eklendi + sağ üstte Sıfırla butonu
 """
 
 import json
@@ -348,7 +348,6 @@ def calc_performance():
                     result["tp2_shadow_stopped"] += 1; ts["tp2_stopped"] += 1
                 elif tp2_shadow == "watching": result["tp2_shadow_watching"] += 1
 
-            # Trailing shadow istatistikleri
             trail = sig.get("trailing_shadow", "n/a")
             if trail not in ("n/a",):
                 result["trailing_shadow_total"] += 1
@@ -543,12 +542,14 @@ def dashboard():
         tp1_pct = round((sig["tp1"] - sig["entry"]) / sig["entry"] * 100, 1) if sig["entry"] > 0 else 0
         tp2_val = sig.get("tp2")
         tp2_pct_open = round((tp2_val - sig["entry"]) / sig["entry"] * 100, 1) if tp2_val and sig["entry"] > 0 else 0
+        # ── DÜZELTME: Stop sütununa yüzde eklendi ──
+        stop_pct = round((sig["stop"] - sig["entry"]) / sig["entry"] * 100, 1) if sig["entry"] > 0 else 0
         open_rows += f"""<tr>
             <td style="color:#ecf0f1"><b>{sym}</b></td><td>{type_badge(sig)}</td>
             <td>{fmt_price(sig['entry'])}</td>
             <td style="color:{cur_c};font-weight:bold">{fmt_price(sig.get('current_price'))} ({cur_s})</td>
             <td style="color:{peak_c}">{peak_s}</td><td style="color:{low_c}">{low_s}</td>
-            <td>{fmt_price(sig['stop'])}</td><td>{fmt_price(sig['tp1'])} (+{tp1_pct}%)</td>
+            <td>{fmt_price(sig['stop'])} ({stop_pct:+.1f}%)</td><td>{fmt_price(sig['tp1'])} (+{tp1_pct}%)</td>
             <td>{fmt_price(tp2_val)} (+{tp2_pct_open}%)</td>
             <td style="font-size:.7rem;color:#7f8c8d">{(sig.get('open_time',''))[:16]}</td></tr>"""
 
@@ -557,7 +558,6 @@ def dashboard():
         close_c, close_s = pct_color(sig.get("close_pct"))
         peak_c, peak_s = pct_color(sig.get("peak_pct"))
         sym = sig["symbol"].replace("/USDT", "")
-        # Trailing badge
         trail = sig.get("trailing_shadow", "n/a")
         trail_cell = '<span style="color:#5a6a7a;font-size:.6rem">—</span>'
         if trail == "stopped":
@@ -642,12 +642,8 @@ def dashboard():
     tp2_stopped_count = perf.get("tp2_shadow_stopped", 0)
     tp2_decided = tp2_hit_count + tp2_stopped_count + perf.get("tp2_shadow_missed", 0)
     tp2_rate = round(tp2_hit_count / tp2_decided * 100, 1) if tp2_decided > 0 else 0
-
-    # TP2 DAHİL P&L hesabı
     tp2_combined_pnl = round(total_pnl + tp2_extra_total, 2)
     tp2_combined_color = "#2ecc71" if tp2_combined_pnl > 0 else ("#e74c3c" if tp2_combined_pnl < 0 else "#8a9bb0")
-
-    # Trailing shadow hesapları
     trail_total = perf.get("trailing_shadow_total", 0)
     trail_stopped = perf.get("trailing_shadow_stopped", 0)
     trail_watching = perf.get("trailing_shadow_watching", 0)
@@ -667,7 +663,7 @@ def dashboard():
 
     html = f"""<!DOCTYPE html>
 <html lang="tr"><head>
-<meta charset="UTF-8"><title>Portföy Takip v2.2</title>
+<meta charset="UTF-8"><title>Portföy Takip v2.4</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="refresh" content="60">
 <style>
@@ -679,7 +675,10 @@ body{{background:var(--bg);color:var(--text);font-family:'JetBrains Mono','Fira 
 .header{{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;
   padding-bottom:16px;border-bottom:1px solid var(--border);}}
 .header h1{{color:var(--accent);font-size:1.1rem;letter-spacing:3px;}}
-.header .time{{color:var(--text-dim);font-size:.75rem;}}
+.header .time{{color:var(--text-dim);font-size:.75rem;display:flex;align-items:center;gap:10px;}}
+.btn-clear{{background:#c0392b22;color:#e74c3c;border:1px solid #e74c3c44;border-radius:4px;
+  padding:3px 10px;font-size:.65rem;cursor:pointer;font-family:inherit;transition:background .2s;}}
+.btn-clear:hover{{background:#c0392b55;}}
 .cards{{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:24px;}}
 .card{{background:var(--card);border:1px solid var(--border);border-radius:6px;padding:14px;text-align:center;}}
 .card .val{{font-size:1.3rem;font-weight:bold;color:var(--accent);display:block;margin-bottom:4px;}}
@@ -709,7 +708,12 @@ tr:hover td{{background:var(--card);}}
 
 <div class="header">
     <h1>📊 PORTFÖY TAKİP</h1>
-    <span class="time">{now} | v2.3</span>
+    <span class="time">
+        {now} | v2.4
+        <button class="btn-clear"
+            onclick="if(confirm('Tüm sinyaller silinecek.\\nEmin misiniz?')){{fetch('/api/signals/clear-all',{{method:'POST'}}).then(r=>r.json()).then(d=>{{alert('Silindi: '+d.removed+' sinyal');location.reload()}})}}"
+        >🗑 Sıfırla</button>
+    </span>
 </div>
 
 <div class="cards">
@@ -801,7 +805,7 @@ tr:hover td{{background:var(--card);}}
 </div>
 
 <div class="footer">
-    Portföy Takip v2.3 | TP1'de kapat + TP2 shadow (fiyat gösterimli) + Trailing shadow |
+    Portföy Takip v2.4 | TP1'de kapat + TP2 shadow (fiyat gösterimli) + Trailing shadow + Stop% |
     Kontrol: {CHECK_INTERVAL//60}dk | Expire: {EXPIRE_HOURS}s | Shadow: {SHADOW_EXPIRE_HOURS}s | {now}
 </div>
 </body></html>"""
@@ -812,8 +816,8 @@ tr:hover td{{background:var(--card);}}
 # ============================================================
 if __name__ == "__main__":
     print("=" * 50, flush=True)
-    print("📊 Portföy Takip Sistemi v2.3", flush=True)
-    print("   TP1'de kapat + TP2 fiyat gösterimi + Trailing sütunu", flush=True)
+    print("📊 Portföy Takip Sistemi v2.4", flush=True)
+    print("   Stop% + Sıfırla butonu eklendi", flush=True)
     print("=" * 50, flush=True)
     print(f"  Kontrol aralığı  : {CHECK_INTERVAL}s ({CHECK_INTERVAL // 60} dk)", flush=True)
     print(f"  Expire süresi    : {EXPIRE_HOURS} saat", flush=True)
